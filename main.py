@@ -36,6 +36,7 @@ class ProxyCollection:
         except:
             print("Failed to get Proxy-List")
 
+
     def GetRandomProxy(self):
         return {"http":self.__proxies[clamp(0, round(random.random() * len(self.__proxies)), len(self.__proxies) - 1)]} 
 
