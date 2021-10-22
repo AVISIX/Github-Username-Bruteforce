@@ -1,97 +1,140 @@
 from logging import error
-from types import LambdaType
+from types import FunctionType, LambdaType, MethodType
 import requests as req 
-import time 
 import random 
-import math 
 
-def FetchProxyList() -> list:
-    result = list() 
-    try:
-        response = req.get("https://www.proxy-list.download/api/v1/get?type=http&anon=elite")
-        if response.status_code == 200 and response.text.replace(" ", "") != "":
-            for line in response.text.split("\n"):
-                if line.replace(" ", "") == "":
-                    continue 
-                result.append(f"http://{line}")
-        else:
-            raise Exception()
-    except:
-        print("Failed to get Proxy-List")
-    return result 
+# # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # 
 
-allProxies = FetchProxyList()
+MAX_NAMES = 25
+MIN_NAME_LENGHT = 4
+MAX_NAME_LENGHT = 4
+
+# # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # 
 
 def clamp(minimum, x, maximum):
     return max(minimum, min(x, maximum))
 
-def GetProxy():
-    return {"http":allProxies[clamp(0, round(random.random() * len(allProxies)), len(allProxies) - 1)]} 
+# # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # 
 
-attemptCounter = 0
-def IsAvailableGitHubName(name: str, useAlternative: bool = False) -> bool:
-    defaultApi = f"https://api.github.com/users/{name}"
+class ProxyCollection:  
+    def __init__(self):
+        self.__proxies = list()
 
-    try:
-        if useAlternative == False:
-            response = req.get(defaultApi, proxies=GetProxy())
+
+    def UpdateProxyList(self): 
+        try:
+            response = req.get("https://www.proxy-list.download/api/v1/get?type=http&anon=elite")
+
+            if response.status_code == 200 and response.text.replace(" ", "") != "":
+                for line in response.text.split("\n"):
+                    if line.replace(" ", "") == "":
+                        continue 
+
+                    self.__proxies.append(f"http://{line}")
+            else:
+                raise Exception()
+        except:
+            print("Failed to get Proxy-List")
+
+    def GetRandomProxy(self):
+        return {"http":self.__proxies[clamp(0, round(random.random() * len(self.__proxies)), len(self.__proxies) - 1)]} 
+
+# # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # 
+
+class GitHubNameChecker:
+    OnAvailableFound   = lambda self,name:print(f"'> {name}' is available.") 
+    OnUnavailableFound = lambda self,name:None  
+    On25Checked        = lambda self,count:print(f"> {count} names checked.") 
+    OnDone             = lambda self:None 
+
+    def __init__(self):
+        self.__proxyManager = ProxyCollection()
+        self.__proxyManager.UpdateProxyList()
+        self.__availableNames = []
+        self.__nameCounter = 0
+
+
+    def GetNames(self) -> list:
+        return self.__availableNames
+
+
+    def __isAvailableGitHubName(self, name: str, useAlternative: bool = False) -> bool:
+        try:
+            httpProxy = self.__proxyManager.GetRandomProxy()
+
+            if useAlternative == False:
+                response = req.get(f"https://api.github.com/users/{name}", proxies=httpProxy)
+            else:
+                response = req.get(f"https://github.com/{name}", proxies=httpProxy)
+
+            if response == None:
+                return True 
+
+            # if we are rate limited, fall back to just requesting the profile itself via github.com 
+            if response.status_code == 403: 
+                return self.__isAvailableGitHubName(name, True)
+
+            if response.status_code == 404:
+                return True 
+        except:
+            return True
+
+        return False 
+
+
+    def __bruteForceRecursive(self, limit: int, builder: str, minLength: int, maxLength: int, charset: str):
+        for char in charset:
+            if len(self.__availableNames) >= limit:
+                break
+
+            temp = builder + char
+
+            if len(temp) > maxLength:
+                break 
+
+            if(len(temp) >= minLength):
+                self.__bruteCallback(temp)
+
+            self.__bruteForceRecursive(limit, temp, minLength, maxLength, charset)
+
+
+    def Bruteforce(self, limit:int = 20, minLength: int = 0, maxLength: int = 9, charset: str = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"):
+        self.__availableNames = list()
+        self.__bruteForceRecursive(limit, "", minLength, maxLength, charset)
+        self.OnDone()
+
+    def __bruteCallback(self, text: str):
+        if self.__isAvailableGitHubName(text) == True:
+            self.OnAvailableFound(text)
+            self.__availableNames.append(text)
         else:
-            response = req.get(f"https://github.com/{name}", proxies=GetProxy())
+            self.OnUnavailableFound(text)
+            
+            if self.__nameCounter % 25 == 0 and self.__nameCounter != 0:
+                self.On25Checked(self.__nameCounter)
 
-        if response == None:
-            return True 
+        self.__nameCounter += 1
 
-        # if we are rate limited, fall back to just requesting the profile itself via github.com 
-        if response.status_code == 403: 
-            return IsAvailableGitHubName(name, True)
-
-        if response.status_code == 404:
-            return True 
-    except:
-        return True
-
-    return False 
-
-def BruteThroughNames(initialString: str, callback, minLength: int = 0, maxLength: int = 9, charset: str = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"):
-    if len(initialString) >= maxLength:
-        return
-
-    for char in charset:
-        temp = initialString + char
-
-        if len(temp) >= maxLength:
-            return
-
-        if(len(temp) >= minLength):
-            callback(temp)
-
-        BruteThroughNames(temp, callback, minLength, maxLength, charset)
-
-    return None 
-
-availableNames = []
-nameCounter = 0
-def BruteCallback(text: str):
-    
-    global nameCounter
-
-    if IsAvailableGitHubName(text) == True:
-        print(f"{text} is available")
-        availableNames.append(text)
-    else:
-        print(f"{text} is unavailable")
-        if nameCounter % 10 == 0 and nameCounter != 0:
-            print(f"{nameCounter} names checked.")
-
-    nameCounter += 1
+# # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # 
 
 print("Checking names...")
 
-BruteThroughNames("", BruteCallback, 3, 5, "abcdefghijklmnopqrstuvwxyz0123456789")
+# 4 is the smallest number avaiable in 2021 
 
-if len(availableNames) > 0:
-    print("All available Names:")
-    for name in availableNames:
-        print(name)
-else: 
-    print("No names found.")
+bruteforce = GitHubNameChecker()
+
+def OnFinished():
+    print("\nFinished.\n")
+
+    names = bruteforce.GetNames()
+
+    if len(names) > 0:
+        print("Available Names:")
+    
+        for name in names:
+            print(f"> '{name}'")
+    else:
+        print("No available Names.")
+
+bruteforce.OnDone = OnFinished
+bruteforce.Bruteforce(MAX_NAMES, MIN_NAME_LENGHT, MAX_NAME_LENGHT, "abcdefghijklmnopqrstuvwxyz0123456789")
